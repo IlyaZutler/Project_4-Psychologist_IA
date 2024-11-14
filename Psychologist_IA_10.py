@@ -73,7 +73,7 @@ def analyze_emotion(audio_data, sr):
     return emotion
 
 # Speech recognition function with emotion analysis
-def recognize_speech():
+def recognize_speech(language_full):
     global recording, finish_session
     patient_query = ""
     r = sr.Recognizer()
@@ -89,11 +89,11 @@ def recognize_speech():
             with sr.Microphone() as source:
                 r.adjust_for_ambient_noise(source)
                 full_text = []
-
+                emotion = "No emotion detected"
                 while recording and not finish_session:
                     try:
-                        audio = r.listen(source, timeout=None)
-                        text = r.recognize_google(audio, language="ru-RU")  # "en-US" or "he"
+                        audio = r.listen(source, timeout=None)           
+                        text = r.recognize_google(audio, language=language_full)  # "ru-RU", "en-US" or ""he-IL"
                         print(f"You said: {text}")
                         full_text.append(text)
                         
@@ -103,7 +103,7 @@ def recognize_speech():
                         print(f"Emotion: {emotion}")
 
                     except sr.UnknownValueError:
-                        print("Could not understand the audio. Please speak clearly.")
+                        print("Could not understand the audio. Please speak clearly.")                        
                     except sr.RequestError as e:
                         print(f"Service error; {e}")
                         break
@@ -117,8 +117,8 @@ def recognize_speech():
 
 # Function to generate an audio response
 @log_execution_time
-def text_to_speech(text):
-    tts = gTTS(text=text, lang='ru')  # Changed 'ru' to 'en' or 'he'
+def text_to_speech(text, language):    
+    tts = gTTS(text=text, lang=language)  # Changed 'ru' to 'en' or 'he'
     tts.save("response.mp3")
     audio = AudioSegment.from_mp3("response.mp3")
     play(audio)
@@ -137,6 +137,7 @@ def find_previous_talk(patient_id, cursor):
 
     return previous_talk[0] if previous_talk else ""
 
+
 # Function to update the session record with patient query
 def update_session_record_query(patient_query, session_record):
     session_record += f"Patient said: {patient_query}. "    
@@ -146,6 +147,7 @@ def update_session_record_query(patient_query, session_record):
 def update_session_record_response(program_response, session_record):
     session_record += f"Psychologist responded: {program_response}. "
     return session_record
+
 
 # Function to find the most similar and most dissimilar conversations 2.2015  seconds
 @log_execution_time
@@ -190,6 +192,7 @@ def find_similar_talks(llm, model, patient_id, query, cursor):
     # Return the summaries of the most similar and most dissimilar talks
     return most_similar_talk, most_dissimilar_talk
 
+
 # Function to retrieve patient information from the database
 @log_execution_time
 def get_patient_info(patient_id, cursor):
@@ -213,6 +216,7 @@ def get_patient_info(patient_id, cursor):
     else:
         return None
 
+
 # Function to generate a response using LLM and langchain-groq. For OpenIA model made fine-tuning as Psychologist
 @log_execution_time 
 def generate_response_llm(llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotion):
@@ -233,14 +237,15 @@ def generate_response_llm(llm, session_record, previous_talk, similar_talk, diss
     """)        
     human_message = HumanMessage(content=f"""
         Here is the current conversation record with the Patient: {session_record}.
-    """)
-    
+    """) 
+
     try:
         response = llm.invoke([system_message, human_message])
     except Exception as e:
         print(f"Error calling LLM: {e}")      
     
     return response.content
+
 
 # Function to generate a summary at the end of the conversation
 @log_execution_time
@@ -347,7 +352,7 @@ def main(patient_id):
 
     session_record = ""
     response_text = ""
-
+    
     # Using DatabaseConnection as a context manager
     with DatabaseConnection() as (conn, cursor):
         if patient_id == 'r':
@@ -364,8 +369,15 @@ def main(patient_id):
         Start_Talk = True
         similar_talk = dissimilar_talk = ""
 
+        language = patient_info['Language'] or 'ru'
+        language_map = {'ru':'ru-RU', 'en':'en-US', 'he':'he-IL'}
+        language_full = language_map[language]
+
+        emotion = "No emotion detected"
+
         while True:
-            patient_query, emotion = recognize_speech()
+            patient_query, emotion_l = recognize_speech(language_full)
+            emotion = emotion_l if emotion_l != "No emotion detected" else emotion
             if finish_session:
                 print("Session ended.")
                 summary = generate_summary(llm, session_record)
@@ -389,7 +401,7 @@ def main(patient_id):
 
             session_record = update_session_record_response(response_text, session_record)
 
-            text_to_speech(response_text)
+            text_to_speech(response_text, language)
 
 # Run the main function
 if __name__ == "__main__":
