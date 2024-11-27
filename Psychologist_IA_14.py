@@ -287,9 +287,7 @@ def update_patient_facts(llm, session_record, patient_info):
 
     # Update additional_datas field using model response
     patient_info['Patient_Facts'] = updated_additional_datas.content.strip()
-    print(f"Patient_Facts: {patient_info['Patient_Facts']}")
     return patient_info
-
 
 @log_execution_time
 def update_diagnosis(llm, session_record, patient_info):
@@ -340,14 +338,14 @@ def register_patient(cursor):
     date_of_birth = input("Enter date of birth (YYYY-MM-DD): ")
     sex = input("Enter sex: ")
     patient_facts = input("Enter additional information if your want: ")
- 
+    diagnosis = "No diagnosis inferred"
+
     # Insert new patient data into the Patients table and get the new ID
     cursor.execute("""
         INSERT INTO Patients (Name, Date_of_birth, Sex, Patient_Facts, Language ) 
         OUTPUT INSERTED.ID_Patient  
         VALUES (?, ?, ?, ?, ?)
     """, (name, date_of_birth, sex, patient_facts, language))
-    diagnosis = "No diagnosis inferred"
 
     # Fetch the ID of the new patient record
     patient_id = cursor.fetchone()[0]  # Retrieves the first column of the first row
@@ -420,9 +418,9 @@ def main(patient_id):
             emotions.append(emotion)
             if finish_session:
                 print("Session ended.")
-                summary = generate_summary(llm, session_record, patient_info)
                 patient_info = update_patient_facts(llm, session_record, patient_info)
                 patient_info = update_diagnosis(llm, session_record, patient_info)
+                summary = generate_summary(llm, session_record, patient_info)
                 print(f"Patient_info: {patient_info}")
                 emotions_string = ', '.join(emotions)
                 save_talk(model, patient_id, session_record, summary, emotions_string, patient_info, cursor)

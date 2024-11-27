@@ -88,8 +88,7 @@ def find_similar_talks(llm, model, patient_id, query, cursor):
     cursor.execute("SELECT Embedding, Summary FROM Talks WHERE ID_Patient = ?", (patient_id,))
     past_talks = cursor.fetchall()
 
-    query_s = generate_summary(llm, query)
-    query_embedding = model.encode(query_s, convert_to_tensor=True)
+    query_embedding = model.encode(query, convert_to_tensor=True)
 
     most_similar_talk = None
     most_dissimilar_talk = None
@@ -115,7 +114,7 @@ def find_similar_talks(llm, model, patient_id, query, cursor):
 # Function to retrieve patient information from the database
 def get_patient_info(patient_id, cursor):
     cursor.execute("""
-        SELECT ID_Patient, Name, Date_of_birth, Sex, Additional_datas, Language 
+        SELECT ID_Patient, Name, Date_of_birth, Sex, Patient_Facts, Language, Diagnosis
         FROM Patients 
         WHERE ID_Patient = ?
     """, (patient_id,))
@@ -127,8 +126,9 @@ def get_patient_info(patient_id, cursor):
             "Name": patient_info[1],
             "Date_of_birth": patient_info[2],
             "Sex": patient_info[3],
-            "Additional_datas": patient_info[4],
-            "Language": patient_info[5]
+            "Patient_Facts": patient_info[4],
+            "Language": patient_info[5],
+            "Diagnosis": patient_info[6]
         }
     else:
         return None
@@ -142,8 +142,9 @@ def generate_response_llm(llm, session_record, previous_talk, similar_talk, diss
             Name: {patient_info['Name']},
             Date of birth: {patient_info['Date_of_birth']},
             Sex: {patient_info['Sex']},
-            Additional data: {patient_info['Additional_datas']},
-            Language: {patient_info['Language']}.
+            Patient_Facts: {patient_info['Patient_Facts']},
+            Language: {patient_info['Language']},
+            Diagnosis: {patient_info['Diagnosis']},
 
         Previous conversation with the Patient: {previous_talk or 'No previous conversation'}. 
         Summary of the most similar conversation with the Patient: {similar_talk or 'No similar conversation'}.
@@ -163,23 +164,59 @@ def generate_response_llm(llm, session_record, previous_talk, similar_talk, diss
 
 # Function to generate a summary at the end of the conversation
 def generate_summary(llm, session_record):
-    system_message = SystemMessage(content="You are a qualified psychologist. Create a brief summary of your conversation with the Patient.")
+    system_message = SystemMessage(content=f"""
+        You are a qualified psychologist. 
+        Create a brief summary of your conversation with Patient.
+        You can use patient information to make the summary searchable.
+        Patient information: {patient_info['Patient_Facts']}.
+        Don't write introductory words.
+        """)
     human_message = HumanMessage(content=f"Conversation: {session_record}.")
     
     response = llm([system_message, human_message])
     return response.content
 
 # Function extracts facts about the patient from his conversation and updates the collected data about him
-def update_patient_info(llm, session_record, patient_info): 
-    system_message = SystemMessage(content=f"""        
-        Review the current conversation transcript and update the 'Additional_datas' field with new facts about the patient, if any: {patient_info['Additional_datas']}.        
-    """) 
-    human_message = HumanMessage(content=f"Here is the current conversation record with the Patient: {session_record}")
+def update_patient_facts(llm, session_record, patient_info):
+    system_message = SystemMessage(content=f"""     
+        You are Psychologist. You will receive known Patient facts.    
+        You will receive the conversation transcript between the Psychologist and the Patient.            
+        Review the transcript and extract new facts about the Patient, if any. 
+        Extract only relevant information and avoid redundant details. 
+        You need return information for field 'Patient_Facts' which will include previously known Patient facts and new facts. Or update Previously known facts if necessary.         
+        This is not a diagnosis and not a description of the patient's condition.
+        Don't write introductory words.
+        """)
+
+    human_message = HumanMessage(content=f"""
+        Here is known Patient facts: {patient_info['Patient_Facts']};
+        Here is the current conversation transcript with the Patient: {session_record}
+        """)
     
     updated_additional_datas = llm([system_message, human_message])
-    patient_info['Additional_datas'] = updated_additional_datas.content.strip()
+    patient_info['Patient_Facts'] = updated_additional_datas.content.strip()
     
     return patient_info
+
+def update_diagnosis(llm, session_record, patient_info):
+    system_message = SystemMessage(content=f"""        
+        You are Psychologist and will receive the your conversation transcript with Patient.
+        Based on the transcript, infer the patient's possible mental or emotional condition (if identifiable) and provide a concise diagnostic hypothesis for field Diagnosis'.
+        Previously known 'Diagnosis' of the Patient: {patient_info['Diagnosis']}.
+        Don't write introductory words.
+    """)
+
+    human_message = HumanMessage(
+        content=f"Here is the current conversation transcript with the Patient: {session_record}")
+
+    # Call the model to update additional_data
+    updated_additional_datas = llm.invoke([system_message, human_message])
+
+    # Update additional_datas field using model response
+    patient_info['Diagnosis'] = updated_additional_datas.content.strip()
+
+    return patient_info
+
 
 # Function to save the conversation data, including the embedding, updates Additional_datas into the database
 def save_talk(model, patient_id, session_record, summary, emotion, patient_info, cursor):
@@ -191,13 +228,13 @@ def save_talk(model, patient_id, session_record, summary, emotion, patient_info,
         VALUES (?, GETDATE(), ?, ?, ?, ?)
     """, (patient_id, session_record, summary, emotion, embedding_str))
 
-    Additional_datas = patient_info['Additional_datas']  
+    patient_facts, diagnosis = patient_info['Patient_Facts'], patient_info['Diagnosis']
 
     cursor.execute("""
         UPDATE Patients
-        SET Additional_datas = ?
+        SET Patient_Facts = ?, Diagnosis = ? 
         WHERE ID_Patient = ?
-    """, (Additional_datas, patient_id))    
+    """, (patient_facts, diagnosis, patient_id))
 
 # Function to register a new patient
 def register_patient(cursor):
@@ -206,14 +243,15 @@ def register_patient(cursor):
     language = st.selectbox("Select language:", ['en', 'iw', 'ru'])
     date_of_birth = st.text_input("Enter date of birth (YYYY-MM-DD):")
     sex = st.text_input("Enter sex:")
-    additional_data = st.text_area("Enter additional information if you want:")    
+    patient_facts = st.text_area("Enter additional information if you want:")
+    diagnosis = "No diagnosis inferred"
 
     if st.button("Register"):
         cursor.execute("""
-            INSERT INTO Patients (Name, Date_of_birth, Sex, Additional_datas, Language) 
+            INSERT INTO Patients (Name, Date_of_birth, Sex, Patient_Facts, Language) 
             OUTPUT INSERTED.ID_Patient
             VALUES (?, ?, ?, ?, ?)
-        """, (name, date_of_birth, sex, additional_data, language))    
+        """, (name, date_of_birth, sex, patient_facts, language))
 
         patient_id = cursor.fetchone()[0]
         st.write(f"Registered with ID: {patient_id}")
@@ -222,8 +260,9 @@ def register_patient(cursor):
             "Name": name,
             "Date_of_birth": date_of_birth,
             "Sex": sex,
-            "Additional_datas": additional_data,
-            "Language": language
+            "Patient_Facts": patient_facts,
+            "Language": language,
+            "Diagnosis": diagnosis
         }
     return None
 
@@ -246,16 +285,16 @@ class DatabaseConnection:
 
 def import_llm_models():
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="ft:gpt-4o-2024-08-06:personal:psychologist-1:APyJnbej", temperature=0.5)
+    llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="ft:gpt-4o-2024-08-06:personal::AXwxYjWD", temperature=0.5)
     model = SentenceTransformer('all-MiniLM-L6-v2')
     return llm, model
 
 def main():
     st.title("Psychologist Session")
-    patient_id = st.text_input("Enter patient ID or 'r' for registration:")
+    patient_id = st.text_input("Enter your ID or 'r' for registration:")
 
     if not patient_id:
-        st.warning("Please enter a patient ID or 'r' to register.")
+        st.warning("Please enter a your ID or 'r' to register.")
         return
 
     llm, model = import_llm_models()
@@ -274,7 +313,7 @@ def main():
             previous_talk = find_previous_talk(patient_id, cursor)
             patient_info = get_patient_info(patient_id, cursor)
             if not patient_info:
-                st.error("Patient not found. Please register.")
+                st.error("ID not found. Please register.")
                 return
 
         st.write(f"Starting session for: {patient_info['Name']}")
@@ -298,10 +337,7 @@ def main():
 
             session_record = update_session_record_query(patient_query, session_record)
 
-            if not similar_talk and not dissimilar_talk:
-                similar_talk, dissimilar_talk = find_similar_talks(
-                    llm, model, patient_id, session_record, cursor
-                )
+            similar_talk, dissimilar_talk = find_similar_talks(llm, model, patient_id, session_record, cursor)
 
             response_text = generate_response_llm(
                 llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotion
@@ -313,9 +349,10 @@ def main():
             text_to_speech(response_text, language)
 
         if st.button("End Session"):
-            summary = generate_summary(llm, session_record)
+            patient_info = update_patient_facts(llm, session_record, patient_info)
+            patient_info = update_diagnosis(llm, session_record, patient_info)
+            summary = generate_summary(llm, session_record, patient_info)
             st.write(f"Conversation summary: {summary}")
-            update_patient_info(llm, session_record, patient_info)
             save_talk(model, patient_id, session_record, summary, emotion, patient_info, cursor)
             st.success("Session ended and data saved.")
 
