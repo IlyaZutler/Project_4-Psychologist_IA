@@ -9,52 +9,8 @@ from langchain.schema import SystemMessage, HumanMessage
 import torch
 import numpy as np
 import os
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 import librosa
-
-# Function to analyze emotion based on audio features
-def analyze_emotion(audio_data, sr):
-    audio_data = audio_data.astype(np.float32) / np.max(np.abs(audio_data))
-    energy = np.mean(librosa.feature.rms(y=audio_data))
-    pitch, _ = librosa.piptrack(y=audio_data, sr=sr)
-    pitch_mean = np.mean(pitch[pitch > 0])
-
-    if energy > 0.1 and pitch_mean > 150:
-        emotion = "excited"
-    elif energy < 0.05:
-        emotion = "calm"
-    elif pitch_mean < 120:
-        emotion = "scared"
-    else:
-        emotion = "neutral"
-
-    return emotion
-
-# Speech recognition function with emotion analysis
-def recognize_speech(language_full):
-    r = sr.Recognizer()
-    patient_query = ""
-    emotion = "No emotion detected"
-
-    with sr.Microphone() as source:
-        st.info("Recording... Speak now!")
-        r.adjust_for_ambient_noise(source)
-        audio = r.listen(source, timeout=None)
-        try:
-            text = r.recognize_google(audio, language=language_full)
-            st.write(f"You said: {text}")
-            patient_query = text
-
-            audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
-            emotion = analyze_emotion(audio_data, source.SAMPLE_RATE)
-            st.write(f"Emotion: {emotion}")
-
-        except sr.UnknownValueError:
-            st.error("Could not understand the audio. Please speak clearly.")
-        except sr.RequestError as e:
-            st.error(f"Service error; {e}")
-
-    return patient_query, emotion
 
 # Function to generate an audio response
 def text_to_speech(text, language):
@@ -137,22 +93,29 @@ def get_patient_info(patient_id, cursor):
 def generate_response_llm(llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotion):
     system_message = SystemMessage(content=f"""        
         Speak {patient_info['Language']}
-        
+        You are a qualified and concise psychologist, helping the Patient discuss their problems. 
+        The conversation consists of several questions and answers. 
+        You will receive for anser a record of the current conversation - the Patient's last question at the end. 
+        You can use the Socratic questioning technique.  
+        Avoid long responses. Ask clarifying questions. 
+        Analyze the entire conversation from the very beginning, and not just the Patient's last phrase. 
+        Pay attention to all the information about the Patient and previous conversations - You can mention this in your questions.
+        Do not repeat the interlocutor's question before answering.
         Patient information:
             Name: {patient_info['Name']},
             Date of birth: {patient_info['Date_of_birth']},
             Sex: {patient_info['Sex']},
             Patient_Facts: {patient_info['Patient_Facts']},
-            Language: {patient_info['Language']},
+            Language: {patient_info['Language']}
             Diagnosis: {patient_info['Diagnosis']},
-
-        Previous conversation with the Patient: {previous_talk or 'No previous conversation'}. 
-        Summary of the most similar conversation with the Patient: {similar_talk or 'No similar conversation'}.
-        Summary of the most dissimilar conversation with the Patient: {dissimilar_talk or 'No dissimilar conversation'}. 
-        Pay attention to the emotional analysis of speech: {emotion or 'No emotion detected'}      
+     
     """)        
     human_message = HumanMessage(content=f"""
         Here is the current conversation record with the Patient: {session_record}.
+        Previous conversation with the Patient: {previous_talk or 'No previous conversation'}. 
+        Summary of the most similar conversation with the Patient: {similar_talk or 'No similar conversation'}.
+        Summary of the most dissimilar conversation with the Patient: {dissimilar_talk or 'No dissimilar conversation'}. 
+        Pay attention to the emotional analysis of speech: {emotion or 'No emotion detected'}
     """) 
 
     try:
@@ -163,17 +126,15 @@ def generate_response_llm(llm, session_record, previous_talk, similar_talk, diss
     return response.content
 
 # Function to generate a summary at the end of the conversation
-def generate_summary(llm, session_record):
+def generate_summary(llm, session_record, patient_info):
     system_message = SystemMessage(content=f"""
         You are a qualified psychologist. 
         Create a brief summary of your conversation with Patient.
-        You can use patient information to make the summary searchable.
-        Patient information: {patient_info['Patient_Facts']}.
         Don't write introductory words.
         """)
-    human_message = HumanMessage(content=f"Conversation: {session_record}.")
+    human_message = HumanMessage(content=f"Here is conversation: {session_record}.")
     
-    response = llm([system_message, human_message])
+    response = llm.invoke([system_message, human_message])
     return response.content
 
 # Function extracts facts about the patient from his conversation and updates the collected data about him
@@ -193,7 +154,7 @@ def update_patient_facts(llm, session_record, patient_info):
         Here is the current conversation transcript with the Patient: {session_record}
         """)
     
-    updated_additional_datas = llm([system_message, human_message])
+    updated_additional_datas = llm.invoke([system_message, human_message])
     patient_info['Patient_Facts'] = updated_additional_datas.content.strip()
     
     return patient_info
@@ -217,10 +178,9 @@ def update_diagnosis(llm, session_record, patient_info):
 
     return patient_info
 
-
 # Function to save the conversation data, including the embedding, updates Additional_datas into the database
 def save_talk(model, patient_id, session_record, summary, emotion, patient_info, cursor):
-    embedding = model.encode(summary, convert_to_tensor=True)
+    embedding = model.encode(session_record, convert_to_tensor=True)
     embedding_str = ','.join(map(str, embedding.tolist()))
     
     cursor.execute("""
@@ -285,77 +245,162 @@ class DatabaseConnection:
 
 def import_llm_models():
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="ft:gpt-4o-2024-08-06:personal::AXwxYjWD", temperature=0.5)
+    llm = ChatOpenAI(api_key=OPENAI_API_KEY, 
+                     model="ft:gpt-4o-2024-08-06:personal::AXwxYjWD",
+                     temperature=0.5) #gpt-4o-2024-08-06 with fine tuning    
     model = SentenceTransformer('all-MiniLM-L6-v2')
     return llm, model
 
+# Function to analyze emotion based on audio features
+def analyze_emotion(audio_data, sr):
+    audio_data = audio_data.astype(np.float32) / np.max(np.abs(audio_data))
+    energy = np.mean(librosa.feature.rms(y=audio_data))
+    pitch, _ = librosa.piptrack(y=audio_data, sr=sr)
+    pitch_mean = np.mean(pitch[pitch > 0])
+
+    if energy > 0.1 and pitch_mean > 150:
+        emotion = "excited"
+    elif energy < 0.05:
+        emotion = "calm"
+    elif pitch_mean < 120:
+        emotion = "scared"
+    else:
+        emotion = "neutral"
+
+    return emotion
+
+def recognize_speech(language_full):
+    r = sr.Recognizer()
+    st.session_state.patient_query = ""
+    st.session_state.full_text = []
+    st.session_state.emotion = "No emotion detected"
+    # Only start the microphone if the recording flag is True  
+    
+    with sr.Microphone() as source:
+        r.adjust_for_ambient_noise(source)            
+        while st.session_state.recording:
+                st.info("Recording... Speak now!")
+                try:
+                    audio = r.listen(source, timeout=None)
+                    text = r.recognize_google(audio, language=language_full)
+                    st.write(f"You said: {text}")
+                    st.session_state.full_text.append(text)
+                    if text:                                               
+                        audio_data = np.frombuffer(audio.get_raw_data(), np.int16)                        
+                        st.session_state.emotion = analyze_emotion(audio_data, source.SAMPLE_RATE) #22050 
+                        st.write(f"Emotion: {st.session_state.emotion}")
+                except sr.UnknownValueError:
+                    continue  # Still listening, do not stop on unknown value
+        st.write("Position 1:")
+        patient_query = ' '.join(st.session_state.full_text)            
+        st.write(f"Full patient query 2: {patient_query}")   
+        return patient_query, st.session_state.emotion
+
+
 def main():
+
     st.title("Psychologist Session")
-    patient_id = st.text_input("Enter your ID or 'r' for registration:")
+    
+    patient_id = st.text_input("Enter your ID or 'r' for registration:", key="patient_id_input")
 
     if not patient_id:
         st.warning("Please enter a your ID or 'r' to register.")
         return
 
-    llm, model = import_llm_models()
-    session_record = ""
-    response_text = ""
-    recording = False
+    if "llm" not in st.session_state or "model" not in st.session_state:
+        st.write("Loading models...")
+        llm, model = import_llm_models()
+        st.session_state.llm = llm
+        st.session_state.model = model
+    else:
+        llm = st.session_state.llm
+        model = st.session_state.model
+
+    if 'recording' not in st.session_state:
+        st.session_state.recording = False
+    if 'was_record' not in st.session_state:
+        st.session_state.have_record = False
+    if 'end_session' not in st.session_state:
+        st.session_state.end_session = False       
+    # st.session_state.setdefault("was_record", True)
+
+    st.session_state.setdefault("language", "")
+    st.session_state.setdefault("language_map", "")
+    st.session_state.setdefault("language_full", "")
+
+    st.session_state.setdefault("session_record", "")
+    st.session_state.setdefault("patient_query", "")
+    st.session_state.setdefault("response_text", "")
+    st.session_state.setdefault("patient_info", "")
+    
 
     with DatabaseConnection() as (conn, cursor):
         if patient_id.lower() == 'r':
-            patient_info = register_patient(cursor)
-            if not patient_info:
+            st.session_state.patient_info = register_patient(cursor)
+            if not st.session_state.patient_info:
                 st.warning("Please complete the registration form.")
                 return
-            patient_id = patient_info['ID_Patient']
+            st.session_state.patient_id = st.session_state.patient_info['ID_Patient']
         else:
             previous_talk = find_previous_talk(patient_id, cursor)
-            patient_info = get_patient_info(patient_id, cursor)
-            if not patient_info:
+            st.session_state.patient_info = get_patient_info(patient_id, cursor)
+            if not st.session_state.patient_info:
                 st.error("ID not found. Please register.")
                 return
 
-        st.write(f"Starting session for: {patient_info['Name']}")
+        st.write(f"Starting session for: {st.session_state.patient_info['Name']}")
 
-        similar_talk = dissimilar_talk = ""
-        language = patient_info['Language'] or 'ru'
-        language_map = {'ru': 'ru-RU', 'en': 'en-US', 'iw': 'he-IL'}
-        language_full = language_map[language]
+        st.session_state.language = st.session_state.patient_info['Language'] or 'ru'
+        st.session_state.language_map = {'ru': 'ru-RU', 'en': 'en-US', 'iw': 'he-IL'}
+        st.session_state.language_full = st.session_state.language_map[st.session_state.language]
 
-        emotion = "No emotion detected"
-
+        st.session_state.emotion = "No emotion detected"
+        
         if st.button("Start Recording"):
-            recording = True
+            st.session_state.recording = True
+            st.session_state.was_record = False
 
         if st.button("Stop Recording"):
-            recording = False
+            st.session_state.recording = False
+            st.session_state.have_record = True
+        
+        emotion_local = ""
+        if st.session_state.recording:
+            st.write("Position 4:")
+            st.session_state.patient_query, emotion_local = recognize_speech(st.session_state.language_full)
+            st.write("Position 4b:")
+        emotion = emotion_local if emotion_local != "No emotion detected" else emotion
+        
+        st.write(f"patient_query 5: {st.session_state.patient_query}")
+        st.write("Position 6")
 
-        if recording:
-            patient_query, emotion_l = recognize_speech(language_full)
-            emotion = emotion_l if emotion_l != "No emotion detected" else emotion
-
-            session_record = update_session_record_query(patient_query, session_record)
-
-            similar_talk, dissimilar_talk = find_similar_talks(llm, model, patient_id, session_record, cursor)
-
-            response_text = generate_response_llm(
-                llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotion
-            )
+        if st.session_state.have_record and not st.session_state.recording and not st.session_state.end_session:
+            st.write(f"Position 7:")
+            st.session_state.session_record = update_session_record_query(st.session_state.patient_query, st.session_state.session_record)            
+           
+            st.write(f"Session record 8: {st.session_state.session_record}")
+            st.write(st.session_state.session_record)
+            similar_talk, dissimilar_talk = find_similar_talks(llm, model, patient_id, st.session_state.session_record, cursor)            
+            response_text = generate_response_llm(llm, st.session_state.session_record, previous_talk, similar_talk, dissimilar_talk, st.session_state.patient_info, emotion)            
             st.write(f"Program response: {response_text}")
-
-            session_record = update_session_record_response(response_text, session_record)
-
-            text_to_speech(response_text, language)
+            st.session_state.session_record = update_session_record_response(response_text, st.session_state.session_record)
+            text_to_speech(response_text, st.session_state.language)
+            
+            #st.session_state.was_record = False
 
         if st.button("End Session"):
-            patient_info = update_patient_facts(llm, session_record, patient_info)
-            patient_info = update_diagnosis(llm, session_record, patient_info)
-            summary = generate_summary(llm, session_record, patient_info)
+            st.session_state.end_session = True
+
+        if st.session_state.end_session:
+            st.session_state.patient_info = update_patient_facts(llm, st.session_state.session_record, st.session_state.patient_info)
+            st.session_state.patient_info = update_diagnosis(llm, st.session_state.session_record, st.session_state.patient_info)
+            summary = generate_summary(llm, st.session_state.session_record, st.session_state.patient_info)
             st.write(f"Conversation summary: {summary}")
-            save_talk(model, patient_id, session_record, summary, emotion, patient_info, cursor)
+            save_talk(model, patient_id, st.session_state.session_record, summary, emotion, st.session_state.patient_info, cursor)
             st.success("Session ended and data saved.")
 
 # Run the main function
 if __name__ == "__main__":
     main()
+
+
