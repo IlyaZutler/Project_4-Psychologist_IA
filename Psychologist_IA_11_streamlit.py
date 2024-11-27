@@ -203,7 +203,7 @@ def save_talk(model, patient_id, session_record, summary, emotion, patient_info,
 def register_patient(cursor):
     st.write("Please register")
     name = st.text_input("Enter name:")
-    language = st.selectbox("Select language:", ['en', 'he', 'ru'])
+    language = st.selectbox("Select language:", ['en', 'iw', 'ru'])
     date_of_birth = st.text_input("Enter date of birth (YYYY-MM-DD):")
     sex = st.text_input("Enter sex:")
     additional_data = st.text_area("Enter additional information if you want:")    
@@ -281,7 +281,7 @@ def main():
 
         similar_talk = dissimilar_talk = ""
         language = patient_info['Language'] or 'ru'
-        language_map = {'ru': 'ru-RU', 'en': 'en-US', 'he': 'he-IL'}
+        language_map = {'ru': 'ru-RU', 'en': 'en-US', 'iw': 'he-IL'}
         language_full = language_map[language]
 
         emotion = "No emotion detected"
