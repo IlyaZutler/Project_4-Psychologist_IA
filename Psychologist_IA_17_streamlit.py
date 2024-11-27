@@ -240,7 +240,15 @@ class DatabaseConnection:
         return self.conn, self.cursor
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.conn.commit()
+        # Check for an exception
+        if exc_type:
+            # In case of an error, roll back the transaction
+            self.conn.rollback()
+        else:
+            # If no errors occurred, commit the changes
+            self.conn.commit()
+        # Close the cursor and connection
+        self.cursor.close()
         self.conn.close()
 
 def import_llm_models():
@@ -284,27 +292,23 @@ def recognize_speech(language_full):
                     audio = r.listen(source, timeout=None)
                     text = r.recognize_google(audio, language=language_full)
                     st.write(f"You said: {text}")
-                    st.session_state.full_text.append(text)
+                    st.session_state.patient_query +=' '+ text
                     if text:                                               
                         audio_data = np.frombuffer(audio.get_raw_data(), np.int16)                        
                         st.session_state.emotion = analyze_emotion(audio_data, source.SAMPLE_RATE) #22050 
                         st.write(f"Emotion: {st.session_state.emotion}")
                 except sr.UnknownValueError:
                     continue  # Still listening, do not stop on unknown value
-        st.write("Position 1:")
-        st.session_state.patient_query = ' '.join(st.session_state.full_text)            
-        st.write(f"Full patient query 2: {st.session_state.patient_query}")   
-        return st.session_state.patient_query, st.session_state.emotion
+        # return st.session_state.patient_query, st.session_state.emotion
 
-
-def main():
-
+def main():    
     st.title("Psychologist Session")
     
-    patient_id = st.text_input("Enter your ID or 'r' for registration:", key="patient_id_input")
+    st.session_state.setdefault("patient_id", "")
+    st.session_state.patient_id = st.text_input("Enter your ID or 'r' for registration:", key="patient_id_input")
 
-    if not patient_id:
-        st.warning("Please enter a your ID or 'r' to register.")
+    if not st.session_state.patient_id:
+        st.warning("Please enter your ID or 'r' to register.")
         return
 
     if "llm" not in st.session_state or "model" not in st.session_state:
@@ -316,13 +320,9 @@ def main():
         llm = st.session_state.llm
         model = st.session_state.model
 
-    if 'recording' not in st.session_state:
-        st.session_state.recording = False
-    if 'was_record' not in st.session_state:
-        st.session_state.have_record = False
-    if 'end_session' not in st.session_state:
-        st.session_state.end_session = False       
-    # st.session_state.setdefault("was_record", True)
+    st.session_state.setdefault("recording", False)
+    st.session_state.setdefault("have_record", False)          
+    st.session_state.setdefault("end_session", False)
 
     st.session_state.setdefault("language", "")
     st.session_state.setdefault("language_map", "")
@@ -330,20 +330,22 @@ def main():
 
     st.session_state.setdefault("session_record", "")
     st.session_state.setdefault("patient_query", "")
-    st.session_state.setdefault("response_text", "")
-    st.session_state.setdefault("patient_info", "")
-    
+    st.session_state.setdefault("patient_info", {})
+    st.session_state.setdefault("previous_talk", "")
 
+    # if "db_connection" not in st.session_state:
+        # st.session_state.db_connection = DatabaseConnection()
+    
     with DatabaseConnection() as (conn, cursor):
-        if patient_id.lower() == 'r':
+        if st.session_state.patient_id.lower() == 'r':
             st.session_state.patient_info = register_patient(cursor)
             if not st.session_state.patient_info:
                 st.warning("Please complete the registration form.")
                 return
             st.session_state.patient_id = st.session_state.patient_info['ID_Patient']
-        else:
-            previous_talk = find_previous_talk(patient_id, cursor)
-            st.session_state.patient_info = get_patient_info(patient_id, cursor)
+        elif not st.session_state.patient_info:
+            st.session_state.previous_talk = find_previous_talk(st.session_state.patient_id, cursor)
+            st.session_state.patient_info = get_patient_info(st.session_state.patient_id, cursor)
             if not st.session_state.patient_info:
                 st.error("ID not found. Please register.")
                 return
@@ -352,41 +354,30 @@ def main():
 
         st.session_state.language = st.session_state.patient_info['Language'] or 'ru'
         st.session_state.language_map = {'ru': 'ru-RU', 'en': 'en-US', 'iw': 'he-IL'}
-        st.session_state.language_full = st.session_state.language_map[st.session_state.language]
-
-        st.session_state.emotion = "No emotion detected"
+        st.session_state.language_full = st.session_state.language_map[st.session_state.language]      
         
         if st.button("Start Recording"):
             st.session_state.recording = True
-            st.session_state.was_record = False
+            st.session_state.have_record = False
 
         if st.button("Stop Recording"):
             st.session_state.recording = False
             st.session_state.have_record = True
         
-        emotion_local = ""
         if st.session_state.recording:
-            st.write("Position 4:")
-            st.session_state.patient_query, emotion_local = recognize_speech(st.session_state.language_full)
-            
-        emotion = emotion_local if emotion_local != "No emotion detected" else emotion
-        
-        st.write(f"patient_query 5: {st.session_state.patient_query}")
-        st.write("Position 6")
+            recognize_speech(st.session_state.language_full)        
+        st.write(f"You said: {st.session_state.patient_query}")
 
         if st.session_state.have_record and not st.session_state.recording and not st.session_state.end_session:
-            st.write(f"Position 7:")
-            st.session_state.session_record = update_session_record_query(st.session_state.patient_query, st.session_state.session_record)            
+            st.session_state.session_record = update_session_record_query(st.session_state.patient_query, st.session_state.session_record)  
            
-            st.write(f"Session record 8: {st.session_state.session_record}")
-            st.write(st.session_state.session_record)
-            similar_talk, dissimilar_talk = find_similar_talks(llm, model, patient_id, st.session_state.session_record, cursor)            
-            response_text = generate_response_llm(llm, st.session_state.session_record, previous_talk, similar_talk, dissimilar_talk, st.session_state.patient_info, emotion)            
+            similar_talk, dissimilar_talk = find_similar_talks(llm, model, st.session_state.patient_id, st.session_state.session_record, cursor)            
+            response_text = generate_response_llm(llm, st.session_state.session_record, st.session_state.previous_talk, similar_talk, dissimilar_talk, st.session_state.patient_info, st.session_state.emotion)            
             st.write(f"Program response: {response_text}")
-            st.session_state.session_record = update_session_record_response(response_text, st.session_state.session_record)
             text_to_speech(response_text, st.session_state.language)
             
-            #st.session_state.was_record = False
+            st.session_state.session_record = update_session_record_response(response_text, st.session_state.session_record)
+            st.session_state.have_record = False
 
         if st.button("End Session"):
             st.session_state.end_session = True
@@ -396,7 +387,7 @@ def main():
             st.session_state.patient_info = update_diagnosis(llm, st.session_state.session_record, st.session_state.patient_info)
             summary = generate_summary(llm, st.session_state.session_record, st.session_state.patient_info)
             st.write(f"Conversation summary: {summary}")
-            save_talk(model, patient_id, st.session_state.session_record, summary, emotion, st.session_state.patient_info, cursor)
+            save_talk(model, st.session_state.patient_id, st.session_state.session_record, summary, st.session_state.emotion, st.session_state.patient_info, cursor)
             st.success("Session ended and data saved.")
 
 # Run the main function

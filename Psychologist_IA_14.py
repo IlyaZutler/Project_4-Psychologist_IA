@@ -16,17 +16,7 @@ import numpy as np
 import os
 #from transformers import pipeline
 
-def import_llm_models():
-    # API key for OpenAI
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")    
-    # Define LLM using OpenAI
-    llm = ChatOpenAI(api_key=OPENAI_API_KEY, 
-                     model="ft:gpt-4o-2024-08-06:personal::AXwxYjWD",
-                     temperature=0.5) #gpt-4o-2024-08-06 with fine tuning
 
-    # Model for generating text embeddings (very little Sentence-BERT model)
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    return llm, model
 
 def log_execution_time(func):
     @functools.wraps(func)
@@ -38,6 +28,20 @@ def log_execution_time(func):
         print(f"Execution time for '{func.__name__}': {execution_time:.4f}  seconds.")
         return result
     return wrapper
+
+
+@log_execution_time
+def import_llm_models():
+    # API key for OpenAI
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    # Define LLM using OpenAI
+    llm = ChatOpenAI(api_key=OPENAI_API_KEY,
+                     model="ft:gpt-4o-2024-08-06:personal::AXwxYjWD",
+                     temperature=0.5) #gpt-4o-2024-08-06 with fine tuning
+
+    # Model for generating text embeddings (very little Sentence-BERT model)
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    return llm, model
 
 def stop_recording():
     global recording
@@ -177,7 +181,14 @@ def get_patient_info(patient_id, cursor):
 def generate_response_llm(llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotions):
     system_message = SystemMessage(content=f"""        
         Speak {patient_info['Language']}        
-        
+        You are a qualified and concise psychologist, helping the Patient discuss their problems. 
+        The conversation consists of several questions and answers. 
+        You will receive for anser a record of the current conversation - the Patient's last question at the end. 
+        You can use the Socratic questioning technique.  
+        Avoid long responses. Ask clarifying questions. 
+        Analyze the entire conversation from the very beginning, and not just the Patient's last phrase. 
+        Pay attention to all the information about the Patient and previous conversations - You can mention this in your questions.
+        Do not repeat the interlocutor's question before answering.
         Patient information:
             Name: {patient_info['Name']},
             Date of birth: {patient_info['Date_of_birth']},
@@ -217,7 +228,6 @@ def generate_summary(llm, session_record, patient_info):
 
     response = llm.invoke([system_message, human_message])
     return response.content
-
 
 # Function extracts facts about the patient from his conversation and updates the collected data about him
 @log_execution_time
