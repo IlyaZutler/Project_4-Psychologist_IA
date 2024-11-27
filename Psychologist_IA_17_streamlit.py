@@ -292,9 +292,9 @@ def recognize_speech(language_full):
                 except sr.UnknownValueError:
                     continue  # Still listening, do not stop on unknown value
         st.write("Position 1:")
-        patient_query = ' '.join(st.session_state.full_text)            
-        st.write(f"Full patient query 2: {patient_query}")   
-        return patient_query, st.session_state.emotion
+        st.session_state.patient_query = ' '.join(st.session_state.full_text)            
+        st.write(f"Full patient query 2: {st.session_state.patient_query}")   
+        return st.session_state.patient_query, st.session_state.emotion
 
 
 def main():
@@ -368,7 +368,7 @@ def main():
         if st.session_state.recording:
             st.write("Position 4:")
             st.session_state.patient_query, emotion_local = recognize_speech(st.session_state.language_full)
-            st.write("Position 4b:")
+            
         emotion = emotion_local if emotion_local != "No emotion detected" else emotion
         
         st.write(f"patient_query 5: {st.session_state.patient_query}")
