@@ -66,7 +66,7 @@ def analyze_emotion(audio_data, sr):
     pitch, _ = librosa.piptrack(y=audio_data, sr=sr)
     pitch_mean = np.mean(pitch[pitch > 0])
 
-    # Basic emotion classification (for demonstration purposes)
+    # Basic emotion classification
     if energy > 0.1 and pitch_mean > 150:
         emotion = "excited"
     elif energy < 0.05:
@@ -363,10 +363,11 @@ def recognize_speech(language_full):
                         text = r.recognize_google(audio, language=language_full)  # "ru-RU", "en-US" or ""he-IL"
                         print(f"You said: {text}")
                         patient_query += ' ' + text
-                        # Convert to audio array for emotion analysis
-                        audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
-                        emotion = analyze_emotion(audio_data, source.SAMPLE_RATE)
-                        print(f"Emotion: {emotion}")
+                        ## Convert to audio array for emotion analysis
+                        # if text:
+                        #     audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
+                        #     emotion = analyze_emotion(audio_data, source.SAMPLE_RATE)
+                        #     print(f"Emotion: {emotion}")
 
                     except sr.UnknownValueError:
                         print("Could not understand the audio. Please speak clearly.")                        
@@ -413,10 +414,12 @@ def main(patient_id):
         emotion = "No emotion detected"
         
         while True:
-            
+
             patient_query, emotion_l = recognize_speech(language_full)            
             emotion = emotion_l if emotion_l != "No emotion detected" else emotion
             emotions.append(emotion)
+            session_record += f"Patient said: {patient_query}. "
+
             if finish_session:
                 print("Session ended.")
                 patient_info = update_patient_facts(llm, session_record, patient_info)
@@ -428,15 +431,12 @@ def main(patient_id):
                 save_talk(model, patient_id, session_record, summary, emotions_string, patient_info, cursor)
                 break
 
-            session_record += f"Patient said: {patient_query}. "
             similar_talk, dissimilar_talk = find_similar_talks(model, patient_info, session_record, cursor)
-
             response_text = generate_response_llm(
                 llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotions
             )
-            print(f"Program response: {response_text}")
             session_record += f"Psychologist responded: {response_text}. "
-
+            print(f"Program response: {response_text}")
             text_to_speech(response_text, language)
 
 # Run the main function

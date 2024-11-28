@@ -29,15 +29,6 @@ def find_previous_talk(patient_id, cursor):
     previous_talk = cursor.fetchone()
     return previous_talk[0] if previous_talk else ""
 
-# Function to update the session record with patient query
-def update_session_record_query(patient_query, session_record):
-    session_record += f"Patient said: {patient_query}. "
-    return session_record
-
-# Function to update the session record with program response
-def update_session_record_response(program_response, session_record):
-    session_record += f"Psychologist responded: {program_response}. "
-    return session_record
 
 # Function to find the most similar and most dissimilar conversations
 def find_similar_talks(llm, model, patient_id, query, cursor):
@@ -369,14 +360,14 @@ def main():
         st.write(f"You said: {st.session_state.patient_query}")
 
         if st.session_state.have_record and not st.session_state.recording and not st.session_state.end_session:
-            st.session_state.session_record = update_session_record_query(st.session_state.patient_query, st.session_state.session_record)  
-           
-            similar_talk, dissimilar_talk = find_similar_talks(llm, model, st.session_state.patient_id, st.session_state.session_record, cursor)            
+            st.session_state.session_record += f"Patient said: {st.session_state.patient_query}. "
+
+            similar_talk, dissimilar_talk = find_similar_talks(llm, model, st.session_state.patient_id, st.session_state.session_record, cursor)
             response_text = generate_response_llm(llm, st.session_state.session_record, st.session_state.previous_talk, similar_talk, dissimilar_talk, st.session_state.patient_info, st.session_state.emotion)            
             st.write(f"Program response: {response_text}")
             text_to_speech(response_text, st.session_state.language)
-            
-            st.session_state.session_record = update_session_record_response(response_text, st.session_state.session_record)
+
+            st.session_state.session_record += f"Psychologist responded: {response_text}. "
             st.session_state.have_record = False
 
         if st.button("End Session"):
