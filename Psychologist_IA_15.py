@@ -363,7 +363,6 @@ def recognize_speech(language_full):
         if recording:  # Recording is active
             with sr.Microphone() as source:
                 r.adjust_for_ambient_noise(source)
-                full_text = []
                 emotion = "No emotion detected"
                 while recording and not finish_session:
                     try:

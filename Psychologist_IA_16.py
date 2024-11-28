@@ -22,6 +22,10 @@ import os #Key OpenAI
 
 import functools # for decorator how long do functions work
 import time
+from time import sleep
+
+import queue
+
 
 #from transformers import pipeline
 
@@ -345,49 +349,82 @@ class DatabaseConnection:
         self.conn.commit()
         self.conn.close()
 
+def record_audio(audio_queue, recognizer, language_full):
+    """Record audio and put it into the queue."""
+    with sr.Microphone() as source:
+        recognizer.adjust_for_ambient_noise(source)  # Adjust microphone for ambient noise
+        print("Recording started...")
+        while recording and not finish_session:
+            try:
+                # Capture audio segment
+                audio = recognizer.listen(source, timeout=None, phrase_time_limit=5)
+                audio_queue.put(audio)  # Place audio in the queue
+            except Exception as e:
+                print(f"Recording error: {e}")
+                break
+        print("Recording stopped.")
 
-# Speech recognition function with emotion analysis
-@log_execution_time
+def process_audio(audio_queue, recognizer, language_full, result_list, emotion_list):
+    """Process audio: recognize speech and analyze emotion."""
+    while not finish_session or not audio_queue.empty():
+        try:
+            # Retrieve audio from the queue
+            audio = audio_queue.get(timeout=1)
+            # Perform speech recognition
+            text = recognizer.recognize_google(audio, language=language_full)
+            print(f"You said: {text}")
+            result_list.append(text)
+
+            # Convert audio data for emotion analysis
+            audio_data = np.frombuffer(audio.get_raw_data(), dtype=np.int16)
+            emotion = analyze_emotion(audio_data, 16000)  # Replace with the correct sample rate
+            emotion_list.append(emotion)
+            print(f"Emotion: {emotion}")
+        except queue.Empty:
+            continue  # Wait for new audio data if the queue is empty
+        except sr.UnknownValueError:
+            print("Could not understand the audio. Please speak clearly.")
+        except sr.RequestError as e:
+            print(f"Service error: {e}")
+            break
+
 def recognize_speech(language_full):
+    """Main function to handle recording and processing speech and emotions."""
     global recording, finish_session
-    patient_query = ""
-    r = sr.Recognizer()
+    patient_query = []
+    emotion_results = []
+    audio_queue = queue.Queue()  # Queue to hold audio data
+    recognizer = sr.Recognizer()
+
     print("Press 's' to start recording, 'f' to stop recording. Press 'q' to end the session.")
 
     while not finish_session:
-        if keyboard.is_pressed('s') and not recording:  # Start recording on 's' key press
+        # Start recording when 's' is pressed
+        if keyboard.is_pressed('s') and not recording:
             recording = True
             print("Recording. Speak...")
-            threading.Thread(target=stop_recording, daemon=True).start()  # Thread to stop recording
+            # Start threads for recording and processing
+            threading.Thread(target=record_audio, args=(audio_queue, recognizer, language_full), daemon=True).start()
+            threading.Thread(target=process_audio,
+                             args=(audio_queue, recognizer, language_full, patient_query, emotion_results),
+                             daemon=True).start()
 
-        if recording:  # Recording is active
-            with sr.Microphone() as source:
-                r.adjust_for_ambient_noise(source)
-                full_text = []
-                emotion = "No emotion detected"
-                while recording and not finish_session:
-                    try:
-                        audio = r.listen(source, timeout=None)           
-                        text = r.recognize_google(audio, language=language_full)  # "ru-RU", "en-US" or ""he-IL"
-                        print(f"You said: {text}")
-                        patient_query += ' ' + text
-                        ## Convert to audio array for emotion analysis
-                        # if text:
-                        #     audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
-                        #     emotion = analyze_emotion(audio_data, source.SAMPLE_RATE)
-                        #     print(f"Emotion: {emotion}")
+        # Stop recording when 'f' is pressed
+        if keyboard.is_pressed('f') and recording:
+            recording = False
+            print("Finishing recording...")
+            sleep(1)  # Small delay to allow threads to finish
 
-                    except sr.UnknownValueError:
-                        print("Could not understand the audio. Please speak clearly.")                        
-                    except sr.RequestError as e:
-                        print(f"Service error; {e}")
-                        break
+        # End the session when 'q' is pressed
+        if keyboard.is_pressed('q'):
+            finish_session = True
+            print("Ending session...")
+            break
 
-                print("Recording stopped.")
-                recording = False
-                return patient_query, emotion  # Return recognized text with emotion
-    
-    return patient_query, "No emotion detected"  # Default return in case of session end
+    # Combine all recognized text and return the last detected emotion
+    final_text = " ".join(patient_query)
+    final_emotion = emotion_results[-1] if emotion_results else "No emotion detected"
+    return final_text, final_emotion
 
 def main(patient_id):
     global recording, finish_session, llm, model
