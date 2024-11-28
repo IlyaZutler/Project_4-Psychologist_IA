@@ -371,11 +371,11 @@ def recognize_speech(language_full):
                         text = r.recognize_google(audio, language=language_full)  # "ru-RU", "en-US" or ""he-IL"
                         print(f"You said: {text}")
                         patient_query += ' ' + text
-                        ## Convert to audio array for emotion analysis
-                        # if text:
-                        #     audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
-                        #     emotion = analyze_emotion(audio_data, source.SAMPLE_RATE)
-                        #     print(f"Emotion: {emotion}")
+                        # Convert to audio array for emotion analysis
+                        if text:
+                            audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
+                            emotion = analyze_emotion(audio_data, source.SAMPLE_RATE)
+                            print(f"Emotion: {emotion}")
 
                     except sr.UnknownValueError:
                         print("Could not understand the audio. Please speak clearly.")                        
