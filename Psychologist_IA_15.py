@@ -98,16 +98,6 @@ def find_previous_talk(patient_id, cursor):
 
     return previous_talk[0] if previous_talk else ""
 
-# Function to update the session record with patient query
-def update_session_record_query(patient_query, session_record):
-    session_record += f"Patient said: {patient_query}. "    
-    return session_record
-
-# Function to update the session record with program response
-def update_session_record_response(program_response, session_record):
-    session_record += f"Psychologist responded: {program_response}. "
-    return session_record
-
 # Function to find the most similar and most dissimilar conversations
 @log_execution_time
 def find_similar_talks(model, patient_info, query, cursor):
@@ -221,10 +211,8 @@ def generate_response_llm(llm, session_record, previous_talk, similar_talk, diss
 def generate_summary(llm, session_record, patient_info):
     system_message = SystemMessage(content=f"""
         You are a qualified Psychologist. 
-        Create a brief summary of your conversation with Patient.
-        You can use patient information to make the summary searchable.        
+        Create a brief summary of your conversation with Patient.          
         Don't write introductory words.
-        Patient information: {patient_info['Patient_Facts']}.
         """)
     human_message = HumanMessage(content=f"Conversation: {session_record}.")
 
@@ -261,6 +249,7 @@ def update_diagnosis(llm, session_record, patient_info):
     system_message = SystemMessage(content=f"""        
         You are Psychologist and will receive the your conversation transcript with Patient.
         Based on the transcript, infer the patient's possible mental or emotional condition (if identifiable) and provide a concise diagnostic hypothesis for field Diagnosis'.
+        If you can't update the Previously known 'Diagnosis' of the Patient, then don't change it, Just return it.
         Don't write introductory words.                
     """)
     ai_message = AIMessage(content=f"""
@@ -433,21 +422,20 @@ def main(patient_id):
                 patient_info = update_patient_facts(llm, session_record, patient_info)
                 patient_info = update_diagnosis(llm, session_record, patient_info)
                 summary = generate_summary(llm, session_record, patient_info)
+                print(f"Summary: {summary}")
                 print(f"Patient_info: {patient_info}")
                 emotions_string = ', '.join(emotions)
                 save_talk(model, patient_id, session_record, summary, emotions_string, patient_info, cursor)
                 break
 
-            session_record = update_session_record_query(patient_query, session_record)
-
+            session_record += f"Patient said: {patient_query}. "
             similar_talk, dissimilar_talk = find_similar_talks(model, patient_info, session_record, cursor)
 
             response_text = generate_response_llm(
                 llm, session_record, previous_talk, similar_talk, dissimilar_talk, patient_info, emotions
             )
             print(f"Program response: {response_text}")
-
-            session_record = update_session_record_response(response_text, session_record)
+            session_record += f"Psychologist responded: {response_text}. "
 
             text_to_speech(response_text, language)
 
