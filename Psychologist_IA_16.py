@@ -364,7 +364,7 @@ def record_audio(audio_queue, recognizer, language_full):
                 break
         print("Recording stopped.")
 
-def process_audio(audio_queue, recognizer, language_full, result_list, emotion_list):
+def recognize_audio(audio_queue, recognizer, language_full, result_list, emotion_list):
     """Process audio: recognize speech and analyze emotion."""
     while not finish_session or not audio_queue.empty():
         try:
@@ -389,7 +389,7 @@ def process_audio(audio_queue, recognizer, language_full, result_list, emotion_l
             break
 
 def recognize_speech(language_full):
-    """Main function to handle recording and processing speech and emotions."""
+    """Main function to handle recording and recognizing speech and emotions."""
     global recording, finish_session
     patient_query = []
     emotion_results = []
@@ -405,7 +405,7 @@ def recognize_speech(language_full):
             print("Recording. Speak...")
             # Start threads for recording and processing
             threading.Thread(target=record_audio, args=(audio_queue, recognizer, language_full), daemon=True).start()
-            threading.Thread(target=process_audio,
+            threading.Thread(target=recognize_audio,
                              args=(audio_queue, recognizer, language_full, patient_query, emotion_results),
                              daemon=True).start()
 

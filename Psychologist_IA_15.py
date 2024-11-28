@@ -25,6 +25,7 @@ import time
 
 #from transformers import pipeline
 
+# decotrator
 def log_execution_time(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -43,7 +44,7 @@ def import_llm_models():
     # Define LLM using OpenAI
     llm = ChatOpenAI(api_key=OPENAI_API_KEY,
                      model="ft:gpt-4o-2024-08-06:personal::AXwxYjWD",
-                     temperature=0.5) #gpt-4o-2024-08-06 with fine tuning
+                     temperature=0.5) # with fine tuning
 
     # Model for generating text embeddings (very little Sentence-BERT model)
     model = SentenceTransformer('all-MiniLM-L6-v2')
