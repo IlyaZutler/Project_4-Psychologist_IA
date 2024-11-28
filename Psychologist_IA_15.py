@@ -80,7 +80,7 @@ def analyze_emotion(audio_data, sr):
 # Function to generate an audio response
 @log_execution_time
 def text_to_speech(text, language):    
-    tts = gTTS(text=text, lang=language)  # Changed 'ru' to 'en' or 'iw'
+    tts = gTTS(text=text, lang=language)  # Changed 'ru' to 'en' or 'iw' NOT 'he'!!!!!!!!!!!!! 
     tts.save("response.mp3")
     audio = AudioSegment.from_mp3("response.mp3")
     play(audio)
@@ -330,7 +330,8 @@ def register_patient(cursor):
     print(f"Your registered with ID: {patient_id}")
     return patient_info
 
-# Connecting to SQL Server database
+# Connecting to SQL Server database/ I couldn't open port 1433 and make dynamic DNS in Bezek
+# That's why this program is not a useful application 
 class DatabaseConnection:
     def __enter__(self):        
         self.conn = pyodbc.connect(
